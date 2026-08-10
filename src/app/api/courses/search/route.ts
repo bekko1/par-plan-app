@@ -28,6 +28,14 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // GORA API 要求: searchRadius は 10 より大きい必要がある
+  if (Number.isNaN(searchRadius) || searchRadius <= 10) {
+    return NextResponse.json(
+      { status: "error", message: "radius must be over 10" },
+      { status: 400 }
+    );
+  }
+
   try {
     const gridKey = buildGridKey(latitude, longitude, searchRadius);
     const supabaseConfigured = isSupabaseConfigured();
