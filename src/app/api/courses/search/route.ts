@@ -40,12 +40,18 @@ export async function GET(req: NextRequest) {
     const gridKey = buildGridKey(latitude, longitude, searchRadius);
     const supabaseConfigured = isSupabaseConfigured();
 
+    let cacheHit = false;
+    let apiCalled = false;
+    let resultCount = 0;
+
     // 手順2: course_search_indexキャッシュを確認
     // ヒットすれば courseIds が返る。ミスなら GORA 検索を行う。
     let courseIds = await getFreshCourseSearchIndex(gridKey);
+    cacheHit = courseIds !== null;
 
     if (!courseIds) {
       // キャッシュミス時は検索結果を先に返し、キャッシュ更新は非同期で行う
+      apiCalled = true;
       const searchResult = await searchGolfCourses({
         latitude,
         longitude,
@@ -54,6 +60,7 @@ export async function GET(req: NextRequest) {
       const items = Array.isArray(searchResult?.items)
         ? searchResult.items
         : [];
+      resultCount = items.length;
       courseIds = items.map((item) => item.golfCourseId);
 
       if (courseIds.length > 0 && supabaseConfigured) {
@@ -76,25 +83,40 @@ export async function GET(req: NextRequest) {
         })();
       }
 
-      return NextResponse.json({ status: "ok", courses: items });
+      return NextResponse.json({
+        status: "ok",
+        cacheHit: false,
+        apiCalled: true,
+        resultCount,
+        courses: items,
+      });
     }
 
     if (!supabaseConfigured) {
       // Supabase 未構成の場合は cache check ではなく GORA を直接返す
+      apiCalled = true;
       const searchResult = await searchGolfCourses({
         latitude,
         longitude,
         searchRadius,
       });
+      const items = Array.isArray(searchResult?.items)
+        ? searchResult.items
+        : [];
+      resultCount = items.length;
       return NextResponse.json({
         status: "ok",
-        courses: searchResult.items ?? [],
+        cacheHit: false,
+        apiCalled: true,
+        resultCount,
+        courses: items,
       });
     }
 
     // course_search_index ヒット時は golf_courses キャッシュを返しつつ、
     // 詳細が欠落していれば非同期で補完する
     const freshCourses = await getFreshGolfCourses(courseIds);
+    resultCount = freshCourses.length;
     const freshIds = new Set(freshCourses.map((c) => c.golf_course_id));
     const missingIds = courseIds.filter((id) => !freshIds.has(id));
 
@@ -111,7 +133,13 @@ export async function GET(req: NextRequest) {
       })();
     }
 
-    return NextResponse.json({ status: "ok", courses: freshCourses });
+    return NextResponse.json({
+      status: "ok",
+      cacheHit: true,
+      apiCalled,
+      resultCount,
+      courses: freshCourses,
+    });
   } catch (err) {
     return NextResponse.json(
       { status: "error", message: (err as Error).message },
