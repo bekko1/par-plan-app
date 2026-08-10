@@ -1,0 +1,71 @@
+import { NextRequest, NextResponse } from "next/server";
+import { buildGridKey } from "@/lib/db/gridKey";
+import {
+  getFreshCourseSearchIndex,
+  upsertCourseSearchIndex,
+} from "@/lib/db/courseSearchIndexRepo";
+import { getFreshGolfCourses, upsertGolfCourseFromDetail } from "@/lib/db/golfCoursesRepo";
+import { searchGolfCourses } from "@/lib/rakuten/courseSearch";
+import { getGolfCourseDetail } from "@/lib/rakuten/courseDetail";
+
+/**
+ * cache_design_draft.md 4節「API呼び出し順序とバッチ化」の手順2〜3を実装したもの。
+ * 手順4(GoraPlanSearch)は別ルート(/api/plans)で行う想定。
+ *
+ * GET /api/courses/search?lat=35.6&lon=139.7&radius=30
+ */
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const latitude = Number(searchParams.get("lat"));
+  const longitude = Number(searchParams.get("lon"));
+  const searchRadius = Number(searchParams.get("radius") ?? "30");
+
+  if (!latitude || !longitude) {
+    return NextResponse.json(
+      { status: "error", message: "lat/lon is required" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const gridKey = buildGridKey(latitude, longitude, searchRadius);
+
+    // 手順2: course_search_indexキャッシュを確認
+    let courseIds = await getFreshCourseSearchIndex(gridKey);
+
+    if (!courseIds) {
+      const searchResult = await searchGolfCourses({
+        latitude,
+        longitude,
+        searchRadius,
+      });
+      courseIds = searchResult.Items.map((item) => item.golfCourseId);
+      await upsertCourseSearchIndex(gridKey, searchRadius, courseIds);
+    }
+
+    // 手順3: golf_coursesキャッシュを確認し、未キャッシュ/TTL切れのみ個別取得(バッチ不可API)
+    const freshCourses = await getFreshGolfCourses(courseIds);
+    const freshIds = new Set(freshCourses.map((c) => c.golf_course_id));
+    const missingIds = courseIds.filter((id) => !freshIds.has(id));
+
+    // NOTE: 骨組み段階のため逐次実行。本実装ではPromise.allSettled + 同時実行数制限
+    // (レート制御キューが1秒間隔で吸収するので直列でも大きな問題はないが、
+    // 件数が多い場合はUXのためタイムアウト/バックグラウンド更新を検討する)
+    for (const id of missingIds) {
+      const detail = await getGolfCourseDetail(id);
+      await upsertGolfCourseFromDetail(detail);
+    }
+
+    const finalCourses =
+      missingIds.length === 0
+        ? freshCourses
+        : await getFreshGolfCourses(courseIds);
+
+    return NextResponse.json({ status: "ok", courses: finalCourses });
+  } catch (err) {
+    return NextResponse.json(
+      { status: "error", message: (err as Error).message },
+      { status: 500 }
+    );
+  }
+}
