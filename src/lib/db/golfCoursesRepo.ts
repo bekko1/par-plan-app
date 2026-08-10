@@ -43,8 +43,15 @@ export async function upsertGolfCourseFromDetail(
     detail.golfCourseImageUrl5,
   ].filter((url): url is string => Boolean(url));
 
+  // defensive: ensure golfCourseId exists and is a number (API may return string)
+  const rawId = (detail as any).golfCourseId;
+  const golfCourseId = typeof rawId === "string" ? Number(rawId) : rawId;
+  if (!golfCourseId && golfCourseId !== 0) {
+    throw new Error("GORA detail response missing golfCourseId: " + JSON.stringify(detail));
+  }
+
   const { error } = await supabase.from("golf_courses").upsert({
-    golf_course_id: detail.golfCourseId,
+    golf_course_id: golfCourseId,
     golf_course_name: detail.golfCourseName,
     golf_course_abbr: detail.golfCourseAbbr ?? null,
     golf_course_kana: detail.golfCourseNameKana ?? null,
