@@ -1,16 +1,19 @@
 import "server-only";
 import { enqueueRakutenCall, Rate429Error } from "./rateLimiter";
 
-// 2026年5月13日の楽天ウェブサービス基盤刷新で app.rakuten.co.jp → openapi.rakuten.co.jp に移行済み。
-// TODO: Issue #2(Vercelからの疎通確認, 200 OK済み)で実際に使ったベースURL・パス構造と
-// 完全に一致しているか必ず確認すること。ここでは仕様上の想定値を置いている。
-const GORA_BASE_URL = "https://openapi.rakuten.co.jp/services/api/Gora";
-
 /**
- * 認証情報。2026年5月のAPI基盤刷新でaccessKeyが必須化(HTTPヘッダー送信)。
- * applicationIdはクエリパラメータ。本番はWebアプリケーションタイプ登録
- * (許可Webサイト + Origin/Referer完全一致検証)を前提とする。
+ * 公式ドキュメント(2026年8月確認)で確定した値:
+ * https://webservice.rakuten.co.jp/documentation/gora-golf-course-search
+ * https://webservice.rakuten.co.jp/documentation/gora-golf-course-detail
+ * https://webservice.rakuten.co.jp/documentation/gora-plan-search
+ *
+ * リクエストURL形式: https://openapi.rakuten.co.jp/engine/api/Gora/{API名}/{version}
+ * 3API共通でversion=20170623(2026年8月時点で最新かつ唯一のバージョン)。
+ * 旧仕様の"/services/api/Gora/"や"20170426"は誤り(以前のスキャフォルドの仮置き値)だったため修正。
  */
+const GORA_BASE_URL = "https://openapi.rakuten.co.jp/engine/api/Gora";
+const GORA_API_VERSION = "20170623";
+
 function getCredentials() {
   const applicationId = process.env.RAKUTEN_APPLICATION_ID;
   const accessKey = process.env.RAKUTEN_ACCESS_KEY;
@@ -25,19 +28,25 @@ function getCredentials() {
 }
 
 export interface GoraRequestOptions {
-  /** 例: "GoraGolfCourseSearch/20170426" のようなエンドポイント+バージョン */
-  endpoint: string;
+  /** 例: "GoraGolfCourseSearch" (バージョンは共通定数から自動付与) */
+  api: "GoraGolfCourseSearch" | "GoraGolfCourseDetail" | "GoraPlanSearch";
   params: Record<string, string | number | undefined>;
   /**
    * true の場合、リクエストにaffiliateIdを付与する。
-   * ただしcache_design_draft.md 2.4の方針により、golf_plans_daily等への保存前の
-   * 「キャッシュ用取得」では false(素のURLを保存)、表示直前の取得でのみ true にする。
+   * 公式ドキュメント確認済み: affiliateIdを含めてリクエストするだけで、
+   * レスポンス中のURL系フィールド(golfCourseDetailUrl/reserveCalUrl/
+   * reservePageUrlPC/reservePageUrlMobile等)がAPI側で自動的にアフィリエイトURLに
+   * 変換されて返ってくる。自前でURL変換ロジックを組む必要はない
+   * (cache_design_draft.md 2.4節で想定していた「自前変換」は不要と判明)。
+   *
+   * cache_design_draft.md の方針通り、キャッシュ用取得(golf_courses等への保存)では
+   * false(素のURL)、表示直前の取得でのみ true にする。
    */
   withAffiliateId?: boolean;
 }
 
 async function rawGoraRequest<T>({
-  endpoint,
+  api,
   params,
   withAffiliateId,
 }: GoraRequestOptions): Promise<T> {
@@ -45,7 +54,11 @@ async function rawGoraRequest<T>({
 
   const query = new URLSearchParams();
   query.set("applicationId", applicationId);
+  // 公式ドキュメント: accessKeyはヘッダーでもクエリパラメータでも可("Can be provided in
+  // either header or as query parameter")。ヘッダー名を推測する必要がないクエリパラメータ方式を採用。
+  query.set("accessKey", accessKey);
   query.set("format", "json");
+  query.set("formatVersion", "2"); // ネストの浅いレスポンス形式(items[0].itemNameでアクセス可能)
 
   if (withAffiliateId) {
     const affiliateId = process.env.RAKUTEN_AFFILIATE_ID;
@@ -59,17 +72,8 @@ async function rawGoraRequest<T>({
     if (value !== undefined) query.set(key, String(value));
   }
 
-  const url = `${GORA_BASE_URL}/${endpoint}?${query.toString()}`;
-
-  const res = await fetch(url, {
-    headers: {
-      // accessKeyはヘッダー経由(2026年5月刷新後の必須仕様)
-      "X-RAKUTEN-Access-Key": accessKey,
-    },
-    // GoraGolfCourseDetail等の準静的データはNext.jsのfetchキャッシュに乗せてよいが、
-    // 実際のTTL制御はSupabase側(src/lib/db)で行うため、ここでは常にno-storeにしておく
-    cache: "no-store",
-  });
+  const url = `${GORA_BASE_URL}/${api}/${GORA_API_VERSION}?${query.toString()}`;
+  const res = await fetch(url, { cache: "no-store" });
 
   if (res.status === 429) {
     throw new Rate429Error();
@@ -77,7 +81,7 @@ async function rawGoraRequest<T>({
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`GORA API error: ${res.status} ${endpoint} ${body}`);
+    throw new Error(`GORA API error: ${res.status} ${api} ${body}`);
   }
 
   return (await res.json()) as T;

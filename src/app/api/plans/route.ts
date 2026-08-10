@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
 
     if (missingIds.length > 0) {
       const result = await searchPlans({ golfCourseIds: missingIds, playDate });
-      await upsertPlans(result.results);
+      await upsertPlans(result.items, playDate);
     }
 
     const finalRows =

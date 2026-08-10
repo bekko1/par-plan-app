@@ -7,11 +7,13 @@ import type { GoraCourseDetailResponse } from "@/lib/types/gora";
  * (cache_design_draft.md 4節 手順3)。
  */
 export async function getGolfCourseDetail(
-  golfCourseId: number
+  golfCourseId: number,
+  carrier: 0 | 1 = 0,
+  withAffiliateId = false
 ): Promise<GoraCourseDetailResponse> {
   return goraRequest<GoraCourseDetailResponse>({
-    endpoint: "GoraGolfCourseDetail/20170426",
-    withAffiliateId: false, // golf_coursesにキャッシュするため素のURLで取得
-    params: { golfCourseId },
+    api: "GoraGolfCourseDetail",
+    withAffiliateId,
+    params: { golfCourseId, carrier },
   });
 }
