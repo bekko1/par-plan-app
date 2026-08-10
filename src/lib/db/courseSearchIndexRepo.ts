@@ -1,10 +1,15 @@
 import "server-only";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import {
+  createServerSupabaseClient,
+  isSupabaseConfigured,
+} from "@/lib/supabase/server";
 import { COURSE_SEARCH_INDEX_TTL_MS, isFresh } from "./ttl";
 
 export async function getFreshCourseSearchIndex(
   gridKey: string
 ): Promise<number[] | null> {
+  if (!isSupabaseConfigured()) return null;
+
   const supabase = createServerSupabaseClient();
   const { data, error } = await supabase
     .from("course_search_index")
@@ -24,6 +29,8 @@ export async function upsertCourseSearchIndex(
   searchRadius: number,
   courseIds: number[]
 ): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+
   const supabase = createServerSupabaseClient();
   const { error } = await supabase.from("course_search_index").upsert({
     grid_key: gridKey,

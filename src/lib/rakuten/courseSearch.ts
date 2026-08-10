@@ -5,11 +5,34 @@ import type { GoraCourseSearchResponse } from "@/lib/types/gora";
 export interface CourseSearchParams {
   latitude?: number;
   longitude?: number;
-  searchRadius?: number; // 10〜300km
+  areaCode?: number;
   keyword?: string;
-  sort?: "+distance" | "-distance" | "+rating" | "-rating" | "highway" | "beginner" | string;
+  searchRadius?: number; // 10〜300km、緯度経度指定時のみ有効。デフォルト150
+  sort?: string; // rating/50on/prefecture/highway/reservation/evaluation等
   page?: number;
-  hits?: number;
+  hits?: number; // 1〜30
+  /** PC:0 mobile:1。表示直前にアフィリエイトURLを取得する際は利用端末に合わせて指定する */
+  carrier?: 0 | 1;
+}
+
+function normalizeCourseSearchResponse(
+  raw: unknown
+): GoraCourseSearchResponse {
+  const anyRaw = raw as Record<string, unknown>;
+  const items = Array.isArray(anyRaw.items)
+    ? anyRaw.items
+    : Array.isArray(anyRaw.Items)
+    ? anyRaw.Items
+    : [];
+
+  return {
+    items: items as GoraCourseSearchResponse["items"],
+    count: typeof anyRaw.count === "number" ? anyRaw.count : 0,
+    page: typeof anyRaw.page === "number" ? anyRaw.page : 0,
+    pageCount: typeof anyRaw.pageCount === "number" ? anyRaw.pageCount : 0,
+    hits: typeof anyRaw.hits === "number" ? anyRaw.hits : 0,
+    carrier: typeof anyRaw.carrier === "number" ? anyRaw.carrier : undefined,
+  };
 }
 
 /**
@@ -17,19 +40,24 @@ export interface CourseSearchParams {
  * course_search_index の grid_key でキャッシュヒットしない場合のみ呼ぶこと。
  */
 export async function searchGolfCourses(
-  params: CourseSearchParams
+  params: CourseSearchParams,
+  withAffiliateId = false
 ): Promise<GoraCourseSearchResponse> {
-  return goraRequest<GoraCourseSearchResponse>({
-    endpoint: "GoraGolfCourseSearch/20170426",
-    withAffiliateId: false, // 検索結果はgolf_coursesにキャッシュするため素のURLで取得
+  const rawResponse = await goraRequest<unknown>({
+    api: "GoraGolfCourseSearch",
+    withAffiliateId,
     params: {
       latitude: params.latitude,
       longitude: params.longitude,
-      searchRadius: params.searchRadius,
+      areaCode: params.areaCode,
       keyword: params.keyword,
+      searchRadius: params.searchRadius,
       sort: params.sort,
       page: params.page,
       hits: params.hits,
+      carrier: params.carrier,
     },
   });
+
+  return normalizeCourseSearchResponse(rawResponse);
 }
