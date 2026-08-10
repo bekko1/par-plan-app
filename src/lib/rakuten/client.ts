@@ -73,7 +73,14 @@ async function rawGoraRequest<T>({
   }
 
   const url = `${GORA_BASE_URL}/${api}/${GORA_API_VERSION}?${query.toString()}`;
-  const res = await fetch(url, { cache: "no-store" });
+  const headers: Record<string, string> = {};
+  const referrer = process.env.RAKUTEN_REFERRER;
+  if (referrer) {
+    headers.Referer = referrer;
+    headers.Origin = referrer;
+  }
+
+  const res = await fetch(url, { cache: "no-store", headers });
 
   if (res.status === 429) {
     throw new Rate429Error();
