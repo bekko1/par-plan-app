@@ -35,42 +35,46 @@ export async function upsertGolfCourseFromDetail(
   const supabase = createServerSupabaseClient();
 
   // 公式ドキュメント: 画像URLは配列ではなくgolfCourseImageUrl1〜5の5個の個別フィールド
+  // GORA のレスポンスが { Item: { ... } } の形で返るケースに対応
+  const payload: any = (detail as any).Item ? (detail as any).Item : detail;
+
+  // 公式ドキュメント: 画像URLは配列ではなくgolfCourseImageUrl1〜5の5個の個別フィールド
   const imageUrls = [
-    detail.golfCourseImageUrl1,
-    detail.golfCourseImageUrl2,
-    detail.golfCourseImageUrl3,
-    detail.golfCourseImageUrl4,
-    detail.golfCourseImageUrl5,
+    payload.golfCourseImageUrl1,
+    payload.golfCourseImageUrl2,
+    payload.golfCourseImageUrl3,
+    payload.golfCourseImageUrl4,
+    payload.golfCourseImageUrl5,
   ].filter((url): url is string => Boolean(url));
 
   // defensive: ensure golfCourseId exists and is a number (API may return string)
-  const rawId = (detail as any).golfCourseId;
+  const rawId = payload.golfCourseId ?? (payload.golfCourseId === 0 ? 0 : undefined);
   const golfCourseId = typeof rawId === "string" ? Number(rawId) : rawId;
-  if (!golfCourseId && golfCourseId !== 0) {
+  if ((golfCourseId === undefined || golfCourseId === null) && golfCourseId !== 0) {
     throw new Error("GORA detail response missing golfCourseId: " + JSON.stringify(detail));
   }
 
   const { error } = await supabase.from("golf_courses").upsert({
     golf_course_id: golfCourseId,
-    golf_course_name: detail.golfCourseName,
-    golf_course_abbr: detail.golfCourseAbbr ?? null,
-    golf_course_kana: detail.golfCourseNameKana ?? null,
-    address: detail.address ?? null,
-    postal_code: detail.postalCode ?? null,
+    golf_course_name: payload.golfCourseName,
+    golf_course_abbr: payload.golfCourseAbbr ?? null,
+    golf_course_kana: payload.golfCourseNameKana ?? null,
+    address: payload.address ?? null,
+    postal_code: payload.postalCode ?? null,
     // 0の場合は未取得扱い。仕様上のリスクへの防御的措置(cache_design_draft.md参照)
-    latitude: detail.latitude || null,
-    longitude: detail.longitude || null,
-    highway: detail.highway ?? null,
-    ic: detail.ic ?? null,
-    ic_distance: detail.icDistance ?? null,
-    course_type: detail.courseType ?? null,
-    designer: detail.designer ?? null,
-    hole_count: detail.holeCount ?? null,
-    par_count: detail.parCount ?? null,
-    course_distance: detail.courseDistance ?? null,
-    dimension: detail.dimension ?? null,
-    evaluation: detail.evaluation ?? null,
-    rating_num: detail.ratingNum ?? null,
+    latitude: payload.latitude || null,
+    longitude: payload.longitude || null,
+    highway: payload.highway ?? null,
+    ic: payload.ic ?? null,
+    ic_distance: payload.icDistance ?? null,
+    course_type: payload.courseType ?? null,
+    designer: payload.designer ?? null,
+    hole_count: payload.holeCount ?? null,
+    par_count: payload.parCount ?? null,
+    course_distance: payload.courseDistance ?? null,
+    dimension: payload.dimension ?? null,
+    evaluation: payload.evaluation ?? null,
+    rating_num: payload.ratingNum ?? null,
     image_urls: imageUrls,
     raw_detail_json: detail,
     fetched_at: new Date().toISOString(),
