@@ -37,117 +37,81 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-      const gridKey = buildGridKey(latitude, longitude, searchRadius);
-      const supabaseConfigured = isSupabaseConfigured();
+    const gridKey = buildGridKey(latitude, longitude, searchRadius);
+    const supabaseConfigured = isSupabaseConfigured();
 
-      // 手順2: course_search_indexキャッシュを確認
-      // ヒットすれば courseIds が返る。ミスなら GORA 検索を行う。
-      let courseIds = await getFreshCourseSearchIndex(gridKey);
-      let searchResult: Awaited<ReturnType<typeof searchGolfCourses>> | null = null;
+    // 手順2: course_search_indexキャッシュを確認
+    // ヒットすれば courseIds が返る。ミスなら GORA 検索を行う。
+    let courseIds = await getFreshCourseSearchIndex(gridKey);
 
-      // 非同期キャッシュ更新の開始フラグと、先に返すレスポンスデータ
-      let asyncCacheStarted = false;
-      let responseCourses: unknown[] | null = null;
+    if (!courseIds) {
+      // キャッシュミス時は検索結果を先に返し、キャッシュ更新は非同期で行う
+      const searchResult = await searchGolfCourses({
+        latitude,
+        longitude,
+        searchRadius,
+      });
+      const items = Array.isArray(searchResult?.items)
+        ? searchResult.items
+        : [];
+      courseIds = items.map((item) => item.golfCourseId);
 
-      if (!courseIds) {
-        // キャッシュが無ければ GORA 検索を実行し、結果を即座に返すために保持する
-        searchResult = await searchGolfCourses({
-          latitude,
-          longitude,
-          searchRadius,
-        });
-        const items = Array.isArray(searchResult?.items)
-          ? searchResult.items
-          : [];
-        courseIds = items.map((item) => item.golfCourseId);
-        responseCourses = items;
+      if (courseIds.length > 0 && supabaseConfigured) {
+        void (async () => {
+          try {
+            await upsertCourseSearchIndex(gridKey, searchRadius, courseIds);
+            const freshCourses = await getFreshGolfCourses(courseIds);
+            const freshIds = new Set(
+              freshCourses.map((c) => c.golf_course_id)
+            );
+            const missingIds = courseIds.filter((id) => !freshIds.has(id));
 
-        if (courseIds.length > 0 && supabaseConfigured) {
-          // 非同期でキャッシュを更新する。API のレスポンスは待たない。
-          asyncCacheStarted = true;
-          void (async () => {
-            try {
-              await upsertCourseSearchIndex(gridKey, searchRadius, courseIds);
-              const freshCourses = await getFreshGolfCourses(courseIds);
-              const freshIds = new Set(
-                freshCourses.map((c) => c.golf_course_id)
-              );
-              const missingIds = courseIds.filter((id) => !freshIds.has(id));
-
-              for (const id of missingIds) {
-                const detail = await getGolfCourseDetail(id);
-                await upsertGolfCourseFromDetail(detail);
-              }
-            } catch (cacheError) {
-              console.error("async cache update failed", cacheError);
+            for (const id of missingIds) {
+              const detail = await getGolfCourseDetail(id);
+              await upsertGolfCourseFromDetail(detail);
             }
-          })();
+          } catch (cacheError) {
+            console.error("async cache update failed", cacheError);
+          }
+        })();
+      }
+
+      return NextResponse.json({ status: "ok", courses: items });
+    }
+
+    if (!supabaseConfigured) {
+      // Supabase 未構成の場合は cache check ではなく GORA を直接返す
+      const searchResult = await searchGolfCourses({
+        latitude,
+        longitude,
+        searchRadius,
+      });
+      return NextResponse.json({
+        status: "ok",
+        courses: searchResult.items ?? [],
+      });
+    }
+
+    // course_search_index ヒット時は golf_courses キャッシュを返しつつ、
+    // 詳細が欠落していれば非同期で補完する
+    const freshCourses = await getFreshGolfCourses(courseIds);
+    const freshIds = new Set(freshCourses.map((c) => c.golf_course_id));
+    const missingIds = courseIds.filter((id) => !freshIds.has(id));
+
+    if (missingIds.length > 0) {
+      void (async () => {
+        try {
+          for (const id of missingIds) {
+            const detail = await getGolfCourseDetail(id);
+            await upsertGolfCourseFromDetail(detail);
+          }
+        } catch (cacheError) {
+          console.error("async detail cache update failed", cacheError);
         }
-      }
+      })();
+    }
 
-      if (!supabaseConfigured) {
-        // Supabase 未構成の場合はキャッシュ処理せず、GORA の結果をそのまま返す
-        if (!searchResult) {
-          searchResult = await searchGolfCourses({
-            latitude,
-            longitude,
-            searchRadius,
-          });
-        }
-        return NextResponse.json({
-          status: "ok",
-          courses: searchResult.items ?? [],
-        });
-      }
-
-      if (responseCourses) {
-        // course_search_index が無かったので、先に GORA 検索結果を返す
-        if (!asyncCacheStarted) {
-          // ここはキャッシュ更新フラグが立っていない場合、
-          // レスポンス後に golf_courses キャッシュのみを非同期で補完する
-          void (async () => {
-            try {
-              const freshCourses = await getFreshGolfCourses(courseIds);
-              const freshIds = new Set(
-                freshCourses.map((c) => c.golf_course_id)
-              );
-              const missingIds = courseIds.filter((id) => !freshIds.has(id));
-
-              if (missingIds.length > 0) {
-                for (const id of missingIds) {
-                  const detail = await getGolfCourseDetail(id);
-                  await upsertGolfCourseFromDetail(detail);
-                }
-              }
-            } catch (cacheError) {
-              console.error("async detail cache update failed", cacheError);
-            }
-          })();
-        }
-
-        return NextResponse.json({ status: "ok", courses: responseCourses });
-      }
-
-      // 手順3: golf_courses キャッシュを確認し、未キャッシュ / TTL 切れのみ個別取得
-      const freshCourses = await getFreshGolfCourses(courseIds);
-      const freshIds = new Set(freshCourses.map((c) => c.golf_course_id));
-      const missingIds = courseIds.filter((id) => !freshIds.has(id));
-
-      // NOTE: 骨組み段階のため逐次実行。
-      // 本実装では Promise.allSettled + 同時実行数制限で改善したい。
-      // レート制御キューが1秒間隔で吸収するので直列でも大きな問題はないが、
-      // 件数が多ければ UX のためにタイムアウトやバックグラウンド更新を検討する。
-      for (const id of missingIds) {
-        const detail = await getGolfCourseDetail(id);
-        await upsertGolfCourseFromDetail(detail);
-      }
-
-      const finalCourses =
-        missingIds.length === 0
-          ? freshCourses
-          : await getFreshGolfCourses(courseIds);
-
-      return NextResponse.json({ status: "ok", courses: finalCourses });
+    return NextResponse.json({ status: "ok", courses: freshCourses });
   } catch (err) {
     return NextResponse.json(
       { status: "error", message: (err as Error).message },
