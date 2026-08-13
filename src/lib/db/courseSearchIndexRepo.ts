@@ -10,7 +10,7 @@ import { COURSE_SEARCH_INDEX_TTL_MS, isFresh } from "./ttl";
  * TODO: 都心部等で件数が多いエリアのレイテンシとのトレードオフのため、
  * 実測してから値を調整すること。
  */
-export const MAX_PAGES_PER_GRID = 5;
+export const MAX_PAGES_PER_GRID = 20;
 
 export interface CourseSearchIndexRecord {
   courseIds: number[];
