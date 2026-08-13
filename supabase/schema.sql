@@ -50,6 +50,12 @@ create table if not exists course_search_index (
   grid_key       text primary key,
   search_radius  int not null,
   course_ids     jsonb not null default '[]'::jsonb,
+  -- 楽天APIの検索メタデータ（キャッシュ時に保存）
+  api_count      int,
+  api_hits       int,
+  api_page       int,
+  api_page_count int,
+  raw_search_json jsonb,
   fetched_at     timestamptz not null default now()
 );
 

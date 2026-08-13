@@ -48,6 +48,11 @@ export interface Database {
           grid_key: string;
           search_radius: number;
           course_ids: number[];
+          api_count: number | null;
+          api_hits: number | null;
+          api_page: number | null;
+          api_page_count: number | null;
+          raw_search_json: unknown;
           fetched_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["course_search_index"]["Row"]> & {
