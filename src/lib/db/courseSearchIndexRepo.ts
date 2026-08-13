@@ -18,7 +18,6 @@ export interface CourseSearchIndexRecord {
   apiHits?: number | null;
   apiPage?: number | null;
   apiPageCount?: number | null;
-  rawSearchJson?: unknown;
   fetchedAt?: string;
   /**
    * 2026年8月追記: course_ids.length が本来の総件数(apiCount)に対して
@@ -43,7 +42,7 @@ export async function getFreshCourseSearchIndex(
   const { data, error } = await supabase
     .from("course_search_index")
     .select(
-      "course_ids, fetched_at, api_count, api_hits, api_page, api_page_count, raw_search_json"
+      "course_ids, fetched_at, api_count, api_hits, api_page, api_page_count"
     )
     .eq("grid_key", gridKey)
     .maybeSingle();
@@ -70,7 +69,6 @@ export async function getFreshCourseSearchIndex(
     apiPage: typeof data.api_page === "number" ? data.api_page : null,
     apiPageCount:
       typeof data.api_page_count === "number" ? data.api_page_count : null,
-    rawSearchJson: data.raw_search_json ?? null,
     fetchedAt: data.fetched_at ?? undefined,
     isComplete,
   };
@@ -85,7 +83,6 @@ export async function upsertCourseSearchIndex(
     apiHits?: number | null;
     apiPage?: number | null;
     apiPageCount?: number | null;
-    rawSearchJson?: unknown;
   }
 ): Promise<void> {
   if (!isSupabaseConfigured()) return;
@@ -102,7 +99,6 @@ export async function upsertCourseSearchIndex(
     if (meta.apiHits !== undefined) payload.api_hits = meta.apiHits;
     if (meta.apiPage !== undefined) payload.api_page = meta.apiPage;
     if (meta.apiPageCount !== undefined) payload.api_page_count = meta.apiPageCount;
-    if (meta.rawSearchJson !== undefined) payload.raw_search_json = meta.rawSearchJson;
   }
 
   const { error } = await supabase.from("course_search_index").upsert(payload);

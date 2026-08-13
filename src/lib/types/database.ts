@@ -35,6 +35,7 @@ export interface Database {
           image_urls: string[];
           raw_detail_json: Record<string, unknown> | null;
           fetched_at: string;
+          detail_fetched_at: string | null;
         };
         Insert: Partial<Database["public"]["Tables"]["golf_courses"]["Row"]> & {
           golf_course_id: number;
@@ -52,7 +53,6 @@ export interface Database {
           api_hits: number | null;
           api_page: number | null;
           api_page_count: number | null;
-          raw_search_json: unknown;
           fetched_at: string;
         };
         Insert: Partial<Database["public"]["Tables"]["course_search_index"]["Row"]> & {

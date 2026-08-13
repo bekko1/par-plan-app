@@ -6,7 +6,7 @@ import {
   upsertCourseSearchIndex,
   MAX_PAGES_PER_GRID,
 } from "@/lib/db/courseSearchIndexRepo";
-import { getFreshGolfCourses, upsertGolfCourseFromDetail } from "@/lib/db/golfCoursesRepo";
+import { getFreshGolfCourses, upsertGolfCourseFromDetail, upsertGolfCoursesFromSearchItems } from "@/lib/db/golfCoursesRepo";
 import { searchGolfCourses } from "@/lib/rakuten/courseSearch";
 import { getGolfCourseDetail } from "@/lib/rakuten/courseDetail";
 import { isSupabaseConfigured } from "@/lib/supabase/server";
@@ -127,13 +127,10 @@ export async function GET(req: NextRequest) {
               apiHits: searchResult.hits ?? null,
               apiPage: searchResult.page ?? null,
               apiPageCount: searchResult.pageCount ?? null,
-              rawSearchJson: searchResult,
             });
 
-            const freshCourses = await getFreshGolfCourses(allCourseIds);
-            const freshIds = new Set(freshCourses.map((c) => c.golf_course_id));
-            const missingIds = allCourseIds.filter((id) => !freshIds.has(id));
-            await backfillMissingCourseDetails(missingIds);
+            await upsertGolfCoursesFromSearchItems(allItems);
+            
           } catch (cacheError) {
             console.error("async cache update failed", cacheError);
           }
