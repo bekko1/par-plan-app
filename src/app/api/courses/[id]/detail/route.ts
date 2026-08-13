@@ -11,9 +11,11 @@ import { GOLF_COURSES_TTL_MS, isFresh } from "@/lib/db/ttl";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
+
 ) {
-  const golfCourseId = Number(params.id);
+  const { id } = await params;
+  const golfCourseId = Number(id);
   if (Number.isNaN(golfCourseId)) {
     return NextResponse.json(
       { status: "error", message: "invalid course id" },
